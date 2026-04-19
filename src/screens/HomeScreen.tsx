@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { View, FlatList, StyleSheet, Text } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useStore } from '../store/useStore';
@@ -7,8 +7,7 @@ import { StatusIndicator } from '../components/StatusIndicator';
 import { ChatBubble } from '../components/ChatBubble';
 import { ApprovalCard } from '../components/ApprovalCard';
 import { TextInputBar } from '../components/TextInput';
-import { startRecording, stopRecording, requestPermissions } from '../services/audio';
-import { transcribeAudio, configureSTT } from '../services/stt';
+import { initVoice, startListening, stopListening, destroyVoice } from '../services/stt';
 import { speak, stop as stopTTS, setTTSEnabled } from '../services/tts';
 import { sendMessage, sendApproval, configureApi, checkConnection } from '../services/api';
 import { colors, spacing } from '../theme';
@@ -24,19 +23,27 @@ export function HomeScreen() {
     loadConversations, loadSettings,
   } = useStore();
 
+  const flatListRef = useRef<FlatList>(null);
+
   // Init
   useEffect(() => {
     (async () => {
       await loadSettings();
       await loadConversations();
-      await requestPermissions();
     })();
+  }, []);
+
+  // Initialize voice recognition
+  useEffect(() => {
+    initVoice((text, isFinal) => {
+      setLiveTranscript(text);
+    });
+    return () => { destroyVoice(); };
   }, []);
 
   // Configure services when settings change
   useEffect(() => {
     configureApi(settings.apiUrl, settings.authToken);
-    configureSTT(settings.apiUrl, settings.authToken);
     setTTSEnabled(settings.ttsEnabled);
 
     // Check connection
@@ -68,7 +75,7 @@ export function HomeScreen() {
     };
     addMessage(convoId, userMsg);
 
-    // Send to Chuck
+    // Send to Chuck via OpenClaw gateway
     setStatus('thinking');
     try {
       const response = await sendMessage(text);
@@ -78,7 +85,7 @@ export function HomeScreen() {
         text: response.reply,
         sender: 'chuck',
         timestamp: Date.now(),
-        status: response.status === 'approval_needed' ? 'approval_needed' : 
+        status: response.status === 'approval_needed' ? 'approval_needed' :
                response.status === 'working' ? 'working' : 'done',
         approvalId: response.approvalId,
       };
@@ -114,39 +121,35 @@ export function HomeScreen() {
     }
 
     if (status === 'listening') {
-      // Stop recording
+      // Stop recording — get transcript from on-device STT
       setStatus('thinking');
-      setLiveTranscript('');
-
-      const audioUri = await stopRecording();
-      if (!audioUri) {
-        setStatus('error');
-        setTimeout(() => setStatus('idle'), 3000);
-        return;
-      }
 
       try {
-        const transcript = await transcribeAudio(audioUri);
-        if (transcript) {
-          await processMessage(transcript);
+        const transcript = await stopListening();
+        setLiveTranscript('');
+
+        if (transcript && transcript.trim()) {
+          await processMessage(transcript.trim());
         } else {
           setStatus('idle');
         }
       } catch {
+        setLiveTranscript('');
         setStatus('error');
         setTimeout(() => setStatus('idle'), 3000);
       }
     } else if (status === 'idle' || status === 'error' || status === 'done') {
-      // Start recording
+      // Start listening — on-device speech recognition
       stopTTS();
       try {
-        await startRecording();
+        await startListening();
         setStatus('listening');
         if (settings.hapticEnabled) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
         }
       } catch {
         setStatus('error');
+        setTimeout(() => setStatus('idle'), 3000);
       }
     }
   }, [status, settings, processMessage]);
@@ -182,19 +185,26 @@ export function HomeScreen() {
 
       {/* Messages */}
       <FlatList
+        ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <ChatBubble message={item} />}
         style={styles.messageList}
         contentContainerStyle={styles.messageContent}
-        inverted={false}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>🎙️</Text>
             <Text style={styles.emptyTitle}>Hey Chuck</Text>
             <Text style={styles.emptySubtitle}>
-              Tap the mic to start talking
+              Tap the mic to start talking{'\n'}
+              or type a message below
             </Text>
+            {!isConnected && (
+              <Text style={styles.connectHint}>
+                ⚠️ Not connected — set your gateway URL in Settings
+              </Text>
+            )}
           </View>
         }
       />
@@ -202,6 +212,7 @@ export function HomeScreen() {
       {/* Live transcript */}
       {liveTranscript ? (
         <View style={styles.transcriptBar}>
+          <Text style={styles.transcriptLabel}>Hearing:</Text>
           <Text style={styles.transcriptText}>{liveTranscript}</Text>
         </View>
       ) : null}
@@ -260,6 +271,14 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: 16,
     color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  connectHint: {
+    fontSize: 14,
+    color: colors.warning,
+    marginTop: spacing.md,
+    textAlign: 'center',
   },
   transcriptBar: {
     backgroundColor: colors.surfaceLight,
@@ -267,10 +286,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     marginHorizontal: spacing.md,
     borderRadius: 12,
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  transcriptLabel: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   transcriptText: {
-    color: colors.textSecondary,
+    color: colors.text,
     fontSize: 14,
-    fontStyle: 'italic',
+    flex: 1,
   },
 });

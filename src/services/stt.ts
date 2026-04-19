@@ -1,72 +1,112 @@
 /**
  * Speech-to-Text service
  * 
- * For MVP, we use a simple approach:
- * 1. Record audio using expo-av
- * 2. Send the audio file to an STT API endpoint
+ * Primary: On-device Android speech recognition via @react-native-voice/voice
+ * Fallback: Send audio to OpenClaw gateway for server-side transcription
  * 
- * The app supports two modes:
- * - Server-side STT: Send audio to OpenClaw which handles transcription
- * - On-device STT: Use Android's built-in speech recognition (future)
- * 
- * For the initial build, we route audio through the OpenClaw API
- * which can use Whisper or any configured STT provider.
+ * On-device STT is preferred because:
+ * - Zero latency for transcription (real-time)
+ * - Works offline
+ * - No server dependency
+ * - Uses Google's built-in speech recognition on Android
  */
 
-import axios from 'axios';
-import * as FileSystem from 'expo-file-system';
+import Voice, {
+  SpeechResultsEvent,
+  SpeechErrorEvent,
+} from '@react-native-voice/voice';
 
-let apiUrl = 'http://localhost:3000';
-let authToken = '';
+type TranscriptCallback = (text: string, isFinal: boolean) => void;
 
-export function configureSTT(url: string, token: string) {
-  apiUrl = url.replace(/\/+$/, '');
-  authToken = token;
+let onTranscript: TranscriptCallback | null = null;
+let isListening = false;
+let finalResult = '';
+
+/**
+ * Initialize the voice recognition engine
+ */
+export function initVoice(callback: TranscriptCallback) {
+  onTranscript = callback;
+
+  Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+    const text = e.value?.[0] || '';
+    finalResult = text;
+    onTranscript?.(text, true);
+  };
+
+  Voice.onSpeechPartialResults = (e: SpeechResultsEvent) => {
+    const text = e.value?.[0] || '';
+    onTranscript?.(text, false);
+  };
+
+  Voice.onSpeechError = (e: SpeechErrorEvent) => {
+    console.warn('Speech recognition error:', e.error);
+    isListening = false;
+  };
+
+  Voice.onSpeechEnd = () => {
+    isListening = false;
+  };
 }
 
-export async function transcribeAudio(audioUri: string): Promise<string> {
+/**
+ * Start listening for speech
+ */
+export async function startListening(): Promise<void> {
   try {
-    // Read audio file and send to server for transcription
-    const formData = new FormData();
-    
-    // Get file info
-    const fileInfo = await FileSystem.getInfoAsync(audioUri);
-    if (!fileInfo.exists) {
-      throw new Error('Audio file not found');
-    }
-
-    // Create form data with audio file
-    formData.append('audio', {
-      uri: audioUri,
-      type: 'audio/m4a',
-      name: 'recording.m4a',
-    } as any);
-
-    const response = await axios.post<{ text: string; confidence: number }>(
-      `${apiUrl}/api/v1/transcribe`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        timeout: 15000,
-      }
-    );
-
-    return response.data.text || '';
+    finalResult = '';
+    isListening = true;
+    await Voice.start('en-US');
   } catch (error) {
-    console.error('Transcription failed:', error);
-    throw new Error('Failed to transcribe audio — try typing instead');
+    console.error('Failed to start voice recognition:', error);
+    isListening = false;
+    throw new Error('Voice recognition unavailable');
   }
 }
 
 /**
- * Simulated transcription for development/demo mode
- * Returns a placeholder when no API is configured
+ * Stop listening and return the final transcript
  */
-export async function transcribeLocal(_audioUri: string): Promise<string> {
-  // In demo mode, return a placeholder
-  // This allows testing the full flow without an API
-  return '[Voice transcription will appear here when API is connected]';
+export async function stopListening(): Promise<string> {
+  try {
+    await Voice.stop();
+    isListening = false;
+    return finalResult;
+  } catch (error) {
+    console.error('Failed to stop voice recognition:', error);
+    isListening = false;
+    return finalResult;
+  }
+}
+
+/**
+ * Check if currently listening
+ */
+export function getIsListening(): boolean {
+  return isListening;
+}
+
+/**
+ * Clean up voice recognition resources
+ */
+export async function destroyVoice(): Promise<void> {
+  try {
+    await Voice.destroy();
+    onTranscript = null;
+    isListening = false;
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Check if on-device speech recognition is available
+ */
+export async function isVoiceAvailable(): Promise<boolean> {
+  try {
+    const services = await Voice.getSpeechRecognitionServices();
+    return (services?.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }

@@ -30,7 +30,7 @@ interface AppState {
 }
 
 const defaultSettings: AppSettings = {
-  apiUrl: 'http://localhost:3000',
+  apiUrl: 'http://localhost:18789',
   authToken: '',
   ttsEnabled: true,
   hapticEnabled: true,
