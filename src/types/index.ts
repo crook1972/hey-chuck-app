@@ -16,12 +16,26 @@ export interface Conversation {
   preview: string;
 }
 
-export interface AppSettings {
+// Private build settings (OpenClaw gateway)
+export interface PrivateSettings {
+  mode: 'private';
+  gatewayUrl: string;
+  authToken: string;
+  networkMode: 'auto' | 'local' | 'tailscale';
+  ttsEnabled: boolean;
+  hapticEnabled: boolean;
+}
+
+// Public build settings (OpenAI direct)
+export interface PublicSettings {
+  mode: 'public';
   apiKey: string;
   model: string;
   ttsEnabled: boolean;
   hapticEnabled: boolean;
 }
+
+export type AppSettings = PrivateSettings | PublicSettings;
 
 export interface ApiResponse {
   reply: string;

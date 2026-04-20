@@ -1,17 +1,15 @@
 import { create } from 'zustand';
-import { AppStatus, Message, Conversation, AppSettings } from '../types';
+import { AppStatus, Message, Conversation, AppSettings, PrivateSettings, PublicSettings } from '../types';
 import { loadConversations, saveConversations, loadSettings, saveSettings } from '../services/storage';
+import { isPrivateBuild, getPrivateConfig } from '../config/build';
 
 interface AppState {
-  // Status
   status: AppStatus;
   setStatus: (status: AppStatus) => void;
 
-  // Current transcript (live while recording)
   liveTranscript: string;
   setLiveTranscript: (text: string) => void;
 
-  // Conversations
   conversations: Conversation[];
   activeConversationId: string | null;
   loadConversations: () => Promise<void>;
@@ -19,22 +17,37 @@ interface AppState {
   addMessage: (conversationId: string, message: Message) => void;
   getActiveConversation: () => Conversation | undefined;
 
-  // Settings
   settings: AppSettings;
   loadSettings: () => Promise<void>;
-  updateSettings: (partial: Partial<AppSettings>) => void;
+  updateSettings: (partial: Partial<PrivateSettings> | Partial<PublicSettings>) => void;
 
-  // Connection
   isConnected: boolean;
   setConnected: (connected: boolean) => void;
+
+  networkStatus: string;
+  setNetworkStatus: (status: string) => void;
 }
 
-const defaultSettings: AppSettings = {
-  apiKey: '',
-  model: 'gpt-4o-mini',
-  ttsEnabled: true,
-  hapticEnabled: true,
-};
+function getDefaultSettings(): AppSettings {
+  if (isPrivateBuild()) {
+    const config = getPrivateConfig();
+    return {
+      mode: 'private',
+      gatewayUrl: config.defaultGatewayUrl,
+      authToken: config.gatewayToken,
+      networkMode: 'auto',
+      ttsEnabled: true,
+      hapticEnabled: true,
+    };
+  }
+  return {
+    mode: 'public',
+    apiKey: '',
+    model: 'gpt-4o-mini',
+    ttsEnabled: true,
+    hapticEnabled: true,
+  };
+}
 
 export const useStore = create<AppState>((set, get) => ({
   status: 'idle',
@@ -70,12 +83,7 @@ export const useStore = create<AppState>((set, get) => ({
     const conversations = get().conversations.map((c) => {
       if (c.id === conversationId) {
         const messages = [...c.messages, message];
-        return {
-          ...c,
-          messages,
-          updatedAt: Date.now(),
-          preview: message.text.slice(0, 80),
-        };
+        return { ...c, messages, updatedAt: Date.now(), preview: message.text.slice(0, 80) };
       }
       return c;
     });
@@ -88,19 +96,24 @@ export const useStore = create<AppState>((set, get) => ({
     return conversations.find((c) => c.id === activeConversationId);
   },
 
-  settings: defaultSettings,
+  settings: getDefaultSettings(),
 
   loadSettings: async () => {
-    const settings = await loadSettings();
-    if (settings) set({ settings: { ...defaultSettings, ...settings } });
+    const saved = await loadSettings();
+    if (saved) {
+      set({ settings: { ...getDefaultSettings(), ...saved } });
+    }
   },
 
   updateSettings: (partial) => {
-    const settings = { ...get().settings, ...partial };
+    const settings = { ...get().settings, ...partial } as AppSettings;
     set({ settings });
     saveSettings(settings);
   },
 
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
+
+  networkStatus: '',
+  setNetworkStatus: (status) => set({ networkStatus: status }),
 }));

@@ -1,67 +1,88 @@
 /**
- * Speech-to-Text via OpenAI Whisper API
+ * Speech-to-Text service
  * 
- * Records audio locally, then sends to OpenAI's /v1/audio/transcriptions
- * endpoint for high-quality transcription.
+ * Private build: sends audio to OpenClaw gateway for transcription
+ * Public build: sends audio to OpenAI Whisper API
  */
 
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
+import { isPrivateBuild } from '../config/build';
 
-const OPENAI_BASE = 'https://api.openai.com/v1';
+let gatewayUrl = '';
+let gatewayToken = '';
+let openaiKey = '';
 
-let apiKey = '';
-
-export function configureSTT(key: string) {
-  apiKey = key;
+export function configureSTTGateway(url: string, token: string) {
+  gatewayUrl = url.replace(/\/+$/, '');
+  gatewayToken = token;
 }
 
-/**
- * Transcribe an audio file using OpenAI Whisper
- */
+export function configureSTTOpenAI(key: string) {
+  openaiKey = key;
+}
+
 export async function transcribeAudio(audioUri: string): Promise<string> {
-  if (!apiKey) {
-    throw new Error('No API key — add your OpenAI key in Settings to enable voice');
+  const fileInfo = await FileSystem.getInfoAsync(audioUri);
+  if (!fileInfo.exists) throw new Error('Audio file not found');
+
+  if (isPrivateBuild()) {
+    return transcribeViaGateway(audioUri);
   }
+  return transcribeViaWhisper(audioUri);
+}
+
+async function transcribeViaGateway(audioUri: string): Promise<string> {
+  if (!gatewayUrl) throw new Error('Gateway not configured');
 
   try {
-    // Verify file exists
-    const fileInfo = await FileSystem.getInfoAsync(audioUri);
-    if (!fileInfo.exists) {
-      throw new Error('Audio file not found');
-    }
-
     const formData = new FormData();
-    formData.append('file', {
+    formData.append('audio', {
       uri: audioUri,
       type: 'audio/m4a',
       name: 'recording.m4a',
     } as any);
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'en');
-    formData.append('response_format', 'json');
 
-    const response = await axios.post<{ text: string }>(
-      `${OPENAI_BASE}/audio/transcriptions`,
+    const response = await axios.post(
+      `${gatewayUrl}/api/transcribe`,
       formData,
       {
         headers: {
           'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${apiKey}`,
+          ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {}),
         },
         timeout: 15000,
       }
     );
-
     return response.data.text || '';
-  } catch (error: any) {
-    if (error.response?.status === 401) {
-      throw new Error('Invalid API key for transcription');
-    }
-    if (error.response?.status === 429) {
-      throw new Error('Rate limited — wait a moment');
-    }
-    console.warn('Whisper transcription failed:', error.message);
-    throw new Error('Voice transcription failed — try typing instead');
+  } catch {
+    // If gateway transcription fails, the user needs to type
+    throw new Error('Voice transcription unavailable — try typing');
   }
+}
+
+async function transcribeViaWhisper(audioUri: string): Promise<string> {
+  if (!openaiKey) throw new Error('No API key for transcription');
+
+  const formData = new FormData();
+  formData.append('file', {
+    uri: audioUri,
+    type: 'audio/m4a',
+    name: 'recording.m4a',
+  } as any);
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'en');
+
+  const response = await axios.post<{ text: string }>(
+    'https://api.openai.com/v1/audio/transcriptions',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      timeout: 15000,
+    }
+  );
+  return response.data.text || '';
 }

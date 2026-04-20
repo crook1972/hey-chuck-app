@@ -6,6 +6,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { useStore } from '../store/useStore';
+import { isPrivateBuild } from '../config/build';
 import { colors } from '../theme';
 
 const Tab = createBottomTabNavigator();
@@ -31,9 +32,7 @@ const darkTheme = {
 function TabIcon({ emoji, focused, badge }: { emoji: string; focused: boolean; badge?: boolean }) {
   return (
     <View>
-      <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>
-        {emoji}
-      </Text>
+      <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>{emoji}</Text>
       {badge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>!</Text>
@@ -44,8 +43,13 @@ function TabIcon({ emoji, focused, badge }: { emoji: string; focused: boolean; b
 }
 
 export function AppNavigation() {
-  const apiKey = useStore((s) => s.settings.apiKey);
-  const needsSetup = !apiKey;
+  const isConnected = useStore((s) => s.isConnected);
+  const settings = useStore((s) => s.settings);
+
+  // Show badge on settings when setup is needed
+  const needsSetup = isPrivateBuild()
+    ? !isConnected  // Private: badge when not connected
+    : settings.mode === 'public' && !(settings as any).apiKey;  // Public: badge when no key
 
   return (
     <NavigationContainer theme={darkTheme}>
@@ -87,7 +91,6 @@ export function AppNavigation() {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="⚙️" focused={focused} badge={needsSetup} />
             ),
-            tabBarLabel: needsSetup ? '⚙️ Setup' : 'Settings',
           }}
         />
       </Tab.Navigator>
@@ -96,27 +99,12 @@ export function AppNavigation() {
 }
 
 const styles = StyleSheet.create({
-  tabIcon: {
-    fontSize: 22,
-    opacity: 0.6,
-  },
-  tabIconActive: {
-    opacity: 1,
-  },
+  tabIcon: { fontSize: 22, opacity: 0.6 },
+  tabIconActive: { opacity: 1 },
   badge: {
-    position: 'absolute',
-    top: -4,
-    right: -8,
-    backgroundColor: colors.danger,
-    borderRadius: 8,
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    position: 'absolute', top: -4, right: -8,
+    backgroundColor: colors.danger, borderRadius: 8,
+    width: 16, height: 16, alignItems: 'center', justifyContent: 'center',
   },
-  badgeText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '800',
-  },
+  badgeText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
 });

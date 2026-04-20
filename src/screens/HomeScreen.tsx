@@ -7,25 +7,29 @@ import { StatusIndicator } from '../components/StatusIndicator';
 import { ChatBubble } from '../components/ChatBubble';
 import { TextInputBar } from '../components/TextInput';
 import { startRecording, stopRecording, requestPermissions } from '../services/audio';
-import { transcribeAudio, configureSTT } from '../services/stt';
+import { transcribeAudio, configureSTTGateway, configureSTTOpenAI } from '../services/stt';
 import { speak, stop as stopTTS, setTTSEnabled } from '../services/tts';
-import { sendMessage, configureApi, checkConnection } from '../services/api';
+import {
+  sendMessage, checkConnection, configureGateway, configureOpenAI,
+  autoDetectGateway,
+} from '../services/api';
+import { isPrivateBuild } from '../config/build';
 import { colors, spacing } from '../theme';
-import { Message } from '../types';
+import { Message, PrivateSettings, PublicSettings } from '../types';
 
 export function HomeScreen() {
   const {
     status, setStatus,
     liveTranscript, setLiveTranscript,
-    conversations, activeConversationId,
+    activeConversationId,
     createConversation, addMessage, getActiveConversation,
     settings, isConnected, setConnected,
     loadConversations, loadSettings,
+    networkStatus, setNetworkStatus,
   } = useStore();
 
   const flatListRef = useRef<FlatList>(null);
 
-  // Init
   useEffect(() => {
     (async () => {
       await loadSettings();
@@ -36,18 +40,35 @@ export function HomeScreen() {
 
   // Configure services when settings change
   useEffect(() => {
-    configureApi(settings.apiKey, settings.model);
-    configureSTT(settings.apiKey);
     setTTSEnabled(settings.ttsEnabled);
 
-    // Check connection (validates API key)
+    if (isPrivateBuild() && settings.mode === 'private') {
+      const ps = settings as PrivateSettings;
+      configureGateway(ps.gatewayUrl, ps.authToken);
+      configureSTTGateway(ps.gatewayUrl, ps.authToken);
+
+      // Auto-detect best network on startup
+      if (ps.networkMode === 'auto') {
+        autoDetectGateway().then((result) => {
+          if (result) {
+            configureGateway(result.url, ps.authToken);
+            configureSTTGateway(result.url, ps.authToken);
+            setNetworkStatus(result.network === 'local' ? '📶 Local' : '🌐 Tailscale');
+          }
+        });
+      }
+    } else if (settings.mode === 'public') {
+      const ps = settings as PublicSettings;
+      configureOpenAI(ps.apiKey, ps.model);
+      configureSTTOpenAI(ps.apiKey);
+    }
+
     checkConnection().then(setConnected);
   }, [settings]);
 
   const activeConvo = getActiveConversation();
   const messages = activeConvo?.messages || [];
 
-  // Build conversation history for GPT context
   const getConversationHistory = useCallback(() => {
     return messages.map((m) => ({
       role: m.sender === 'user' ? 'user' : 'assistant',
@@ -57,47 +78,41 @@ export function HomeScreen() {
 
   const processMessage = useCallback(async (text: string) => {
     let convoId = activeConversationId;
-    if (!convoId) {
-      convoId = createConversation();
-    }
+    if (!convoId) convoId = createConversation();
 
-    const userMsg: Message = {
+    addMessage(convoId, {
       id: Date.now().toString(),
       text,
       sender: 'user',
       timestamp: Date.now(),
-    };
-    addMessage(convoId, userMsg);
+    });
 
     setStatus('thinking');
     try {
       const history = getConversationHistory();
       const response = await sendMessage(text, history);
 
-      const chuckMsg: Message = {
+      addMessage(convoId, {
         id: (Date.now() + 1).toString(),
         text: response.reply,
         sender: 'chuck',
         timestamp: Date.now(),
         status: 'done',
-      };
-      addMessage(convoId, chuckMsg);
+      });
       setStatus('done');
 
       if (settings.ttsEnabled && response.reply) {
         await speak(response.reply);
       }
-
       setTimeout(() => setStatus('idle'), 2000);
     } catch (error: any) {
-      const errorMsg: Message = {
+      addMessage(convoId, {
         id: (Date.now() + 1).toString(),
         text: error.message || 'Something went wrong',
         sender: 'chuck',
         timestamp: Date.now(),
         status: 'error',
-      };
-      addMessage(convoId, errorMsg);
+      });
       setStatus('error');
       setTimeout(() => setStatus('idle'), 5000);
     }
@@ -109,20 +124,17 @@ export function HomeScreen() {
     }
 
     if (status === 'listening') {
-      // Stop recording and transcribe via Whisper
       setStatus('thinking');
       setLiveTranscript('');
-
       const audioUri = await stopRecording();
       if (!audioUri) {
         setStatus('error');
         setTimeout(() => setStatus('idle'), 3000);
         return;
       }
-
       try {
         const transcript = await transcribeAudio(audioUri);
-        if (transcript && transcript.trim()) {
+        if (transcript?.trim()) {
           await processMessage(transcript.trim());
         } else {
           setStatus('idle');
@@ -132,7 +144,6 @@ export function HomeScreen() {
         setTimeout(() => setStatus('idle'), 3000);
       }
     } else if (status === 'idle' || status === 'error' || status === 'done') {
-      // Start recording
       stopTTS();
       try {
         await startRecording();
@@ -148,9 +159,13 @@ export function HomeScreen() {
     }
   }, [status, settings, processMessage]);
 
+  const connectionLabel = isPrivateBuild()
+    ? (isConnected ? `Connected ${networkStatus}` : 'Disconnected')
+    : (isConnected ? 'Connected to OpenAI' : 'Not connected');
+
   return (
     <View style={styles.container}>
-      <StatusIndicator isConnected={isConnected} />
+      <StatusIndicator isConnected={isConnected} label={connectionLabel} />
 
       <FlatList
         ref={flatListRef}
@@ -165,12 +180,15 @@ export function HomeScreen() {
             <Text style={styles.emptyIcon}>🎙️</Text>
             <Text style={styles.emptyTitle}>Hey Chuck</Text>
             <Text style={styles.emptySubtitle}>
-              Your voice-first AI assistant{'\n'}
-              Tap the mic or type below
+              {isPrivateBuild()
+                ? 'Tap the mic to talk to Chuck'
+                : 'Your voice-first AI assistant\nTap the mic or type below'}
             </Text>
             {!isConnected && (
               <Text style={styles.connectHint}>
-                ⚠️ Add your OpenAI API key in Settings to get started
+                {isPrivateBuild()
+                  ? '⚠️ Cannot reach gateway — check Settings'
+                  : '⚠️ Add your OpenAI API key in Settings'}
               </Text>
             )}
           </View>
@@ -195,55 +213,14 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  messageList: {
-    flex: 1,
-  },
-  messageContent: {
-    paddingVertical: spacing.sm,
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: spacing.xxl,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  connectHint: {
-    fontSize: 14,
-    color: colors.warning,
-    marginTop: spacing.md,
-    textAlign: 'center',
-  },
-  transcriptBar: {
-    backgroundColor: colors.surfaceLight,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.md,
-    borderRadius: 12,
-  },
-  transcriptText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  messageList: { flex: 1 },
+  messageContent: { paddingVertical: spacing.sm, flexGrow: 1, justifyContent: 'flex-end' },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: spacing.xxl },
+  emptyIcon: { fontSize: 64, marginBottom: spacing.md },
+  emptyTitle: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
+  emptySubtitle: { fontSize: 16, color: colors.textSecondary, textAlign: 'center', lineHeight: 24 },
+  connectHint: { fontSize: 14, color: colors.warning, marginTop: spacing.md, textAlign: 'center' },
+  transcriptBar: { backgroundColor: colors.surfaceLight, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginHorizontal: spacing.md, borderRadius: 12 },
+  transcriptText: { color: colors.textSecondary, fontSize: 14 },
 });

@@ -4,9 +4,10 @@ import { colors, spacing } from '../theme';
 
 interface StatusIndicatorProps {
   isConnected: boolean;
+  label?: string;
 }
 
-export function StatusIndicator({ isConnected }: StatusIndicatorProps) {
+export function StatusIndicator({ isConnected, label }: StatusIndicatorProps) {
   return (
     <View style={styles.container}>
       <View
@@ -16,7 +17,7 @@ export function StatusIndicator({ isConnected }: StatusIndicatorProps) {
         ]}
       />
       <Text style={styles.text}>
-        {isConnected ? 'Connected to Chuck' : 'Disconnected'}
+        {label || (isConnected ? 'Connected' : 'Disconnected')}
       </Text>
     </View>
   );
