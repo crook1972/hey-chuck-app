@@ -2,191 +2,131 @@ import axios, { AxiosError } from 'axios';
 import { ApiResponse } from '../types';
 
 /**
- * OpenClaw Gateway API Client
+ * OpenAI API Client
  * 
- * Connects directly to the OpenClaw gateway at port 18789.
- * Uses the gateway auth token for authentication.
+ * Hey Chuck uses OpenAI's API directly for chat and audio.
+ * Each user can enter their own API key, or the app ships with
+ * a default Chuck Intelligence key for out-of-box experience.
  * 
- * The gateway exposes a REST API and WebSocket interface.
- * For MVP, we use the REST /api/sessions endpoint to send messages
- * and receive responses from Chuck.
+ * Endpoints used:
+ * - POST /v1/chat/completions (GPT chat)
+ * - POST /v1/audio/transcriptions (Whisper STT)
  */
 
-let gatewayUrl = 'http://localhost:18789';
-let authToken = '';
+const OPENAI_BASE = 'https://api.openai.com/v1';
 
-export function configureApi(url: string, token: string) {
-  gatewayUrl = url.replace(/\/+$/, '');
-  authToken = token;
+// Default key for out-of-box experience (Chuck Intelligence account)
+// Users can override with their own key in Settings
+const DEFAULT_API_KEY = '';
+
+let apiKey = DEFAULT_API_KEY;
+let model = 'gpt-4o-mini';
+
+const SYSTEM_PROMPT = `You are Chuck, a fast, reliable voice assistant. You help users get things done quickly.
+
+Key behaviors:
+- Be concise. Voice responses should be short and clear.
+- Be direct. Skip filler words and pleasantries.
+- If a task is ambiguous, ask one clarifying question.
+- For complex requests, break them into steps.
+- Always confirm when you've completed something.
+- If you can't do something, say so immediately.
+
+You're optimized for voice interaction — keep responses under 2-3 sentences when possible.`;
+
+export function configureApi(key: string, modelOverride?: string) {
+  apiKey = key || DEFAULT_API_KEY;
+  if (modelOverride) model = modelOverride;
+}
+
+export function getApiKey(): string {
+  return apiKey;
 }
 
 function getHeaders() {
   return {
     'Content-Type': 'application/json',
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    'Authorization': `Bearer ${apiKey}`,
   };
 }
 
 /**
- * Send a message to Chuck via the OpenClaw gateway.
- * Uses the gateway's session messaging API.
+ * Send a chat message to OpenAI GPT
  */
-export async function sendMessage(message: string, sessionLabel: string = 'hey-chuck'): Promise<ApiResponse> {
+export async function sendMessage(
+  message: string,
+  conversationHistory: { role: string; content: string }[] = [],
+): Promise<ApiResponse> {
+  if (!apiKey) {
+    throw new Error('No API key set — add your OpenAI key in Settings');
+  }
+
   try {
-    // Try the gateway's chat/send endpoint
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...conversationHistory.slice(-20), // Keep last 20 messages for context
+      { role: 'user', content: message },
+    ];
+
     const response = await axios.post(
-      `${gatewayUrl}/api/chat`,
+      `${OPENAI_BASE}/chat/completions`,
       {
-        message,
-        agent: 'main',
-        session: sessionLabel,
+        model,
+        messages,
+        max_tokens: 1024,
+        temperature: 0.7,
       },
       {
         headers: getHeaders(),
-        timeout: 60000, // Chuck might take a while on complex tasks
+        timeout: 30000,
       }
     );
 
-    const data = response.data;
-    
-    // Normalize response format
+    const reply = response.data.choices?.[0]?.message?.content || 'No response';
+
     return {
-      reply: data.reply || data.message || data.text || data.content || JSON.stringify(data),
-      status: data.approvalId ? 'approval_needed' : 
-              data.status === 'working' ? 'working' : 'done',
-      approvalId: data.approvalId,
+      reply,
+      status: 'done',
     };
   } catch (error) {
-    const axiosError = error as AxiosError;
-    
-    // If the /api/chat endpoint doesn't exist, try /api/sessions/send
-    if (axiosError.response?.status === 404) {
-      return sendViaSessionsApi(message, sessionLabel);
-    }
+    const axiosError = error as AxiosError<any>;
 
     if (axiosError.response) {
       const status = axiosError.response.status;
-      if (status === 401 || status === 403) {
-        throw new Error('Auth failed — check your gateway token in Settings');
+      const errMsg = axiosError.response.data?.error?.message || '';
+
+      if (status === 401) {
+        throw new Error('Invalid API key — check your key in Settings');
       }
-      throw new Error(`Gateway error (${status})`);
+      if (status === 429) {
+        throw new Error('Rate limited — wait a moment and try again');
+      }
+      if (status === 402 || errMsg.includes('billing')) {
+        throw new Error('API billing issue — check your OpenAI account');
+      }
+      throw new Error(`API error (${status}): ${errMsg || 'Unknown error'}`);
     } else if (axiosError.code === 'ECONNABORTED') {
-      throw new Error('Request timed out — Chuck might be working on something big');
+      throw new Error('Request timed out — try again');
     } else if (axiosError.code === 'ERR_NETWORK') {
-      throw new Error('Cannot reach gateway — check your connection and URL');
+      throw new Error('No internet connection');
     }
-    throw new Error('Failed to reach Chuck');
+    throw new Error('Failed to reach OpenAI');
   }
 }
 
 /**
- * Fallback: send via the gateway sessions API
- */
-async function sendViaSessionsApi(message: string, sessionLabel: string): Promise<ApiResponse> {
-  try {
-    const response = await axios.post(
-      `${gatewayUrl}/api/sessions/send`,
-      {
-        message,
-        label: sessionLabel,
-      },
-      {
-        headers: getHeaders(),
-        timeout: 60000,
-      }
-    );
-
-    const data = response.data;
-    return {
-      reply: data.reply || data.message || data.text || data.content || 'Message sent to Chuck',
-      status: 'done',
-    };
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    if (axiosError.response) {
-      throw new Error(`Gateway error (${axiosError.response.status})`);
-    }
-    throw new Error('Failed to reach Chuck via sessions API');
-  }
-}
-
-/**
- * Send an approval decision to the gateway
- */
-export async function sendApproval(approvalId: string, approved: boolean): Promise<ApiResponse> {
-  try {
-    const response = await axios.post(
-      `${gatewayUrl}/api/approve`,
-      { approvalId, approved },
-      {
-        headers: getHeaders(),
-        timeout: 15000,
-      }
-    );
-
-    return {
-      reply: response.data.reply || (approved ? 'Approved' : 'Denied'),
-      status: 'done',
-    };
-  } catch {
-    throw new Error('Failed to send approval');
-  }
-}
-
-/**
- * Check gateway connectivity
+ * Check if the API key is valid
  */
 export async function checkConnection(): Promise<boolean> {
+  if (!apiKey) return false;
+
   try {
-    const response = await axios.get(`${gatewayUrl}/api/health`, {
-      headers: getHeaders(),
+    const response = await axios.get(`${OPENAI_BASE}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
       timeout: 5000,
     });
     return response.status === 200;
   } catch {
-    // Try root endpoint as fallback
-    try {
-      const response = await axios.get(gatewayUrl, {
-        headers: getHeaders(),
-        timeout: 5000,
-      });
-      return response.status === 200;
-    } catch {
-      return false;
-    }
-  }
-}
-
-/**
- * Send audio for transcription via the gateway.
- * If the gateway doesn't have a transcribe endpoint,
- * falls back to sending the text "[voice message]" placeholder.
- */
-export async function transcribeViaGateway(audioUri: string): Promise<string> {
-  try {
-    const formData = new FormData();
-    formData.append('audio', {
-      uri: audioUri,
-      type: 'audio/m4a',
-      name: 'recording.m4a',
-    } as any);
-
-    const response = await axios.post(
-      `${gatewayUrl}/api/transcribe`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        timeout: 15000,
-      }
-    );
-
-    return response.data.text || '';
-  } catch {
-    // Gateway may not have transcription endpoint
-    // Return null to signal caller to use on-device STT
-    throw new Error('TRANSCRIBE_UNAVAILABLE');
+    return false;
   }
 }

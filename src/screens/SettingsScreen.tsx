@@ -8,63 +8,63 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import { useStore } from '../store/useStore';
 import { checkConnection } from '../services/api';
 import { colors, spacing } from '../theme';
 
+const MODELS = [
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini', desc: 'Fast & affordable' },
+  { value: 'gpt-4o', label: 'GPT-4o', desc: 'Most capable' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', desc: 'Latest mini' },
+  { value: 'gpt-4.1', label: 'GPT-4.1', desc: 'Latest flagship' },
+];
+
 export function SettingsScreen() {
   const { settings, updateSettings, isConnected, setConnected } = useStore();
-  const [apiUrl, setApiUrl] = useState(settings.apiUrl);
-  const [authToken, setAuthToken] = useState(settings.authToken);
+  const [apiKey, setApiKey] = useState(settings.apiKey);
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    setApiUrl(settings.apiUrl);
-    setAuthToken(settings.authToken);
-  }, [settings]);
+    setApiKey(settings.apiKey);
+  }, [settings.apiKey]);
 
-  const handleSave = () => {
-    updateSettings({ apiUrl: apiUrl.trim(), authToken: authToken.trim() });
-    Alert.alert('Saved', 'Settings updated successfully');
+  const handleSaveKey = async () => {
+    const trimmed = apiKey.trim();
+    updateSettings({ apiKey: trimmed });
+
+    if (trimmed) {
+      setTesting(true);
+      const ok = await checkConnection();
+      setConnected(ok);
+      setTesting(false);
+      Alert.alert(
+        ok ? '✅ Connected' : '❌ Invalid Key',
+        ok ? 'API key is valid. You\'re ready to go!' : 'Could not verify the key. Check it and try again.'
+      );
+    }
   };
 
-  const handleTestConnection = async () => {
-    setTesting(true);
-    // Temporarily configure with new values
-    updateSettings({ apiUrl: apiUrl.trim(), authToken: authToken.trim() });
-    const ok = await checkConnection();
-    setConnected(ok);
-    setTesting(false);
-    Alert.alert(
-      ok ? '✅ Connected' : '❌ Connection Failed',
-      ok ? 'Successfully connected to Chuck' : 'Could not reach the server. Check the URL and try again.'
-    );
+  const handleGetKey = () => {
+    Linking.openURL('https://platform.openai.com/api-keys');
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Connection */}
-      <Text style={styles.sectionTitle}>Connection</Text>
+      {/* API Key */}
+      <Text style={styles.sectionTitle}>OpenAI API Key</Text>
       <View style={styles.card}>
-        <Text style={styles.label}>OpenClaw API URL</Text>
-        <TextInput
-          style={styles.input}
-          value={apiUrl}
-          onChangeText={setApiUrl}
-          placeholder="http://localhost:3000"
-          placeholderTextColor={colors.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
+        <Text style={styles.desc}>
+          Hey Chuck uses OpenAI for chat (GPT) and voice transcription (Whisper).
+          Enter your own API key to get started.
+        </Text>
 
-        <Text style={styles.label}>Auth Token</Text>
         <TextInput
           style={styles.input}
-          value={authToken}
-          onChangeText={setAuthToken}
-          placeholder="Paste your API token"
+          value={apiKey}
+          onChangeText={setApiKey}
+          placeholder="sk-..."
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -72,22 +72,52 @@ export function SettingsScreen() {
         />
 
         <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.testButton} onPress={handleTestConnection} disabled={testing}>
-            <Text style={styles.testButtonText}>
-              {testing ? 'Testing...' : 'Test Connection'}
-            </Text>
+          <TouchableOpacity style={styles.linkButton} onPress={handleGetKey}>
+            <Text style={styles.linkButtonText}>Get API Key →</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Save</Text>
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={handleSaveKey}
+            disabled={testing}
+          >
+            <Text style={styles.saveButtonText}>
+              {testing ? 'Verifying...' : 'Save & Verify'}
+            </Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.done : colors.danger }]} />
           <Text style={styles.statusText}>
-            {isConnected ? 'Connected' : 'Not connected'}
+            {isConnected ? 'API key verified' : settings.apiKey ? 'Key not verified' : 'No key set'}
           </Text>
         </View>
+      </View>
+
+      {/* Model */}
+      <Text style={styles.sectionTitle}>AI Model</Text>
+      <View style={styles.card}>
+        {MODELS.map((m) => (
+          <TouchableOpacity
+            key={m.value}
+            style={[
+              styles.modelRow,
+              settings.model === m.value && styles.modelRowActive,
+            ]}
+            onPress={() => updateSettings({ model: m.value })}
+          >
+            <View style={[
+              styles.radio,
+              settings.model === m.value && styles.radioActive,
+            ]}>
+              {settings.model === m.value && <View style={styles.radioInner} />}
+            </View>
+            <View style={styles.modelInfo}>
+              <Text style={styles.modelName}>{m.label}</Text>
+              <Text style={styles.modelDesc}>{m.desc}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Preferences */}
@@ -124,7 +154,9 @@ export function SettingsScreen() {
       <Text style={styles.sectionTitle}>About</Text>
       <View style={styles.card}>
         <Text style={styles.aboutText}>Hey Chuck v1.0.0</Text>
-        <Text style={styles.aboutSubtext}>Voice-first interface for Chuck-HQ</Text>
+        <Text style={styles.aboutSubtext}>Voice-first AI assistant</Text>
+        <Text style={styles.aboutSubtext}>Powered by OpenAI GPT & Whisper</Text>
+        <Text style={[styles.aboutSubtext, { marginTop: spacing.sm }]}>© 2026 Chuck Intelligence</Text>
       </View>
     </ScrollView>
   );
@@ -154,11 +186,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing.md,
   },
-  label: {
+  desc: {
     fontSize: 14,
     color: colors.textSecondary,
-    marginBottom: spacing.xs,
-    marginTop: spacing.sm,
+    lineHeight: 20,
+    marginBottom: spacing.md,
   },
   input: {
     backgroundColor: colors.surfaceLight,
@@ -169,13 +201,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     borderWidth: 1,
     borderColor: colors.border,
+    fontFamily: 'monospace',
   },
   buttonRow: {
     flexDirection: 'row',
     gap: spacing.sm,
     marginTop: spacing.md,
   },
-  testButton: {
+  linkButton: {
     flex: 1,
     paddingVertical: spacing.sm + 2,
     borderRadius: 10,
@@ -184,8 +217,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  testButtonText: {
-    color: colors.textSecondary,
+  linkButtonText: {
+    color: colors.primary,
     fontWeight: '600',
   },
   saveButton: {
@@ -214,6 +247,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
   },
+  modelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border + '20',
+  },
+  modelRowActive: {},
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  radioActive: {
+    borderColor: colors.primary,
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.primary,
+  },
+  modelInfo: {
+    flex: 1,
+  },
+  modelName: {
+    fontSize: 16,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  modelDesc: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -239,6 +312,6 @@ const styles = StyleSheet.create({
   aboutSubtext: {
     fontSize: 13,
     color: colors.textMuted,
-    marginTop: 4,
+    marginTop: 2,
   },
 });

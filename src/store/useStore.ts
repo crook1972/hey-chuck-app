@@ -30,8 +30,8 @@ interface AppState {
 }
 
 const defaultSettings: AppSettings = {
-  apiUrl: 'http://localhost:18789',
-  authToken: '',
+  apiKey: '',
+  model: 'gpt-4o-mini',
   ttsEnabled: true,
   hapticEnabled: true,
 };
@@ -92,7 +92,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadSettings: async () => {
     const settings = await loadSettings();
-    if (settings) set({ settings });
+    if (settings) set({ settings: { ...defaultSettings, ...settings } });
   },
 
   updateSettings: (partial) => {

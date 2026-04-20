@@ -1,4 +1,4 @@
-export type AppStatus = 'idle' | 'listening' | 'thinking' | 'working' | 'done' | 'approval_needed' | 'error';
+export type AppStatus = 'idle' | 'listening' | 'thinking' | 'working' | 'done' | 'error';
 
 export interface Message {
   id: string;
@@ -6,7 +6,6 @@ export interface Message {
   sender: 'user' | 'chuck';
   timestamp: number;
   status?: AppStatus;
-  approvalId?: string;
 }
 
 export interface Conversation {
@@ -18,14 +17,13 @@ export interface Conversation {
 }
 
 export interface AppSettings {
-  apiUrl: string;
-  authToken: string;
+  apiKey: string;
+  model: string;
   ttsEnabled: boolean;
   hapticEnabled: boolean;
 }
 
 export interface ApiResponse {
   reply: string;
-  status: 'done' | 'working' | 'approval_needed';
-  approvalId?: string;
+  status: 'done' | 'working';
 }

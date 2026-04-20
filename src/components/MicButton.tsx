@@ -21,7 +21,6 @@ const statusLabels: Record<AppStatus, string> = {
   thinking: 'Thinking...',
   working: 'Working...',
   done: 'Done',
-  approval_needed: 'Needs Approval',
   error: 'Error — Tap to Retry',
 };
 
@@ -31,7 +30,6 @@ const statusColors: Record<AppStatus, string> = {
   thinking: colors.thinking,
   working: colors.working,
   done: colors.done,
-  approval_needed: colors.warning,
   error: colors.danger,
 };
 
@@ -41,7 +39,6 @@ const statusIcons: Record<AppStatus, string> = {
   thinking: '💭',
   working: '⚡',
   done: '✅',
-  approval_needed: '⚠️',
   error: '❌',
 };
 

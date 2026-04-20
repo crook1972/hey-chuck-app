@@ -5,12 +5,11 @@ import { useStore } from '../store/useStore';
 import { MicButton } from '../components/MicButton';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { ChatBubble } from '../components/ChatBubble';
-import { ApprovalCard } from '../components/ApprovalCard';
 import { TextInputBar } from '../components/TextInput';
 import { startRecording, stopRecording, requestPermissions } from '../services/audio';
 import { transcribeAudio, configureSTT } from '../services/stt';
 import { speak, stop as stopTTS, setTTSEnabled } from '../services/tts';
-import { sendMessage, sendApproval, configureApi, checkConnection } from '../services/api';
+import { sendMessage, configureApi, checkConnection } from '../services/api';
 import { colors, spacing } from '../theme';
 import { Message } from '../types';
 
@@ -37,22 +36,24 @@ export function HomeScreen() {
 
   // Configure services when settings change
   useEffect(() => {
-    configureApi(settings.apiUrl, settings.authToken);
-    configureSTT(settings.apiUrl, settings.authToken);
+    configureApi(settings.apiKey, settings.model);
+    configureSTT(settings.apiKey);
     setTTSEnabled(settings.ttsEnabled);
 
-    // Check connection
+    // Check connection (validates API key)
     checkConnection().then(setConnected);
-    const interval = setInterval(() => {
-      checkConnection().then(setConnected);
-    }, 30000);
-    return () => clearInterval(interval);
   }, [settings]);
 
   const activeConvo = getActiveConversation();
   const messages = activeConvo?.messages || [];
-  const lastMessage = messages[messages.length - 1];
-  const showApproval = lastMessage?.status === 'approval_needed' && lastMessage.approvalId;
+
+  // Build conversation history for GPT context
+  const getConversationHistory = useCallback(() => {
+    return messages.map((m) => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.text,
+    }));
+  }, [messages]);
 
   const processMessage = useCallback(async (text: string) => {
     let convoId = activeConversationId;
@@ -70,27 +71,24 @@ export function HomeScreen() {
 
     setStatus('thinking');
     try {
-      const response = await sendMessage(text);
+      const history = getConversationHistory();
+      const response = await sendMessage(text, history);
 
       const chuckMsg: Message = {
         id: (Date.now() + 1).toString(),
         text: response.reply,
         sender: 'chuck',
         timestamp: Date.now(),
-        status: response.status === 'approval_needed' ? 'approval_needed' :
-               response.status === 'working' ? 'working' : 'done',
-        approvalId: response.approvalId,
+        status: 'done',
       };
       addMessage(convoId, chuckMsg);
-      setStatus(chuckMsg.status || 'done');
+      setStatus('done');
 
       if (settings.ttsEnabled && response.reply) {
         await speak(response.reply);
       }
 
-      if (response.status === 'done') {
-        setTimeout(() => setStatus('idle'), 3000);
-      }
+      setTimeout(() => setStatus('idle'), 2000);
     } catch (error: any) {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -103,7 +101,7 @@ export function HomeScreen() {
       setStatus('error');
       setTimeout(() => setStatus('idle'), 5000);
     }
-  }, [activeConversationId, settings]);
+  }, [activeConversationId, settings, getConversationHistory]);
 
   const handleMicPress = useCallback(async () => {
     if (settings.hapticEnabled) {
@@ -111,7 +109,7 @@ export function HomeScreen() {
     }
 
     if (status === 'listening') {
-      // Stop recording and transcribe
+      // Stop recording and transcribe via Whisper
       setStatus('thinking');
       setLiveTranscript('');
 
@@ -130,7 +128,6 @@ export function HomeScreen() {
           setStatus('idle');
         }
       } catch {
-        // Transcription failed — show error but don't crash
         setStatus('error');
         setTimeout(() => setStatus('idle'), 3000);
       }
@@ -151,27 +148,6 @@ export function HomeScreen() {
     }
   }, [status, settings, processMessage]);
 
-  const handleApproval = useCallback(async (approved: boolean) => {
-    if (!lastMessage?.approvalId) return;
-    setStatus('working');
-    try {
-      const response = await sendApproval(lastMessage.approvalId, approved);
-      const convoId = activeConversationId!;
-      const msg: Message = {
-        id: Date.now().toString(),
-        text: response.reply,
-        sender: 'chuck',
-        timestamp: Date.now(),
-        status: response.status === 'done' ? 'done' : 'working',
-      };
-      addMessage(convoId, msg);
-      setStatus('done');
-      setTimeout(() => setStatus('idle'), 3000);
-    } catch {
-      setStatus('error');
-    }
-  }, [lastMessage, activeConversationId]);
-
   return (
     <View style={styles.container}>
       <StatusIndicator isConnected={isConnected} />
@@ -189,12 +165,12 @@ export function HomeScreen() {
             <Text style={styles.emptyIcon}>🎙️</Text>
             <Text style={styles.emptyTitle}>Hey Chuck</Text>
             <Text style={styles.emptySubtitle}>
-              Tap the mic to start talking{'\n'}
-              or type a message below
+              Your voice-first AI assistant{'\n'}
+              Tap the mic or type below
             </Text>
             {!isConnected && (
               <Text style={styles.connectHint}>
-                ⚠️ Not connected — set gateway URL in Settings
+                ⚠️ Add your OpenAI API key in Settings to get started
               </Text>
             )}
           </View>
@@ -206,14 +182,6 @@ export function HomeScreen() {
           <Text style={styles.transcriptText}>🔴 {liveTranscript}</Text>
         </View>
       ) : null}
-
-      {showApproval && (
-        <ApprovalCard
-          message={lastMessage!.text}
-          onApprove={() => handleApproval(true)}
-          onDeny={() => handleApproval(false)}
-        />
-      )}
 
       <MicButton status={status} onPress={handleMicPress} />
 
