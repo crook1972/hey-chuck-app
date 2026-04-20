@@ -1,112 +1,54 @@
 /**
  * Speech-to-Text service
  * 
- * Primary: On-device Android speech recognition via @react-native-voice/voice
- * Fallback: Send audio to OpenClaw gateway for server-side transcription
+ * MVP approach: Record audio with expo-av, then either:
+ * 1. Send to OpenClaw gateway for server-side transcription (Whisper etc.)
+ * 2. Use typed text as fallback
  * 
- * On-device STT is preferred because:
- * - Zero latency for transcription (real-time)
- * - Works offline
- * - No server dependency
- * - Uses Google's built-in speech recognition on Android
+ * The audio recording is handled by the audio service.
+ * This service manages the transcription pipeline.
+ * 
+ * Future: Add on-device STT via expo-speech-recognition when stable.
  */
 
-import Voice, {
-  SpeechResultsEvent,
-  SpeechErrorEvent,
-} from '@react-native-voice/voice';
+import axios from 'axios';
 
-type TranscriptCallback = (text: string, isFinal: boolean) => void;
+let apiUrl = 'http://localhost:18789';
+let authToken = '';
 
-let onTranscript: TranscriptCallback | null = null;
-let isListening = false;
-let finalResult = '';
-
-/**
- * Initialize the voice recognition engine
- */
-export function initVoice(callback: TranscriptCallback) {
-  onTranscript = callback;
-
-  Voice.onSpeechResults = (e: SpeechResultsEvent) => {
-    const text = e.value?.[0] || '';
-    finalResult = text;
-    onTranscript?.(text, true);
-  };
-
-  Voice.onSpeechPartialResults = (e: SpeechResultsEvent) => {
-    const text = e.value?.[0] || '';
-    onTranscript?.(text, false);
-  };
-
-  Voice.onSpeechError = (e: SpeechErrorEvent) => {
-    console.warn('Speech recognition error:', e.error);
-    isListening = false;
-  };
-
-  Voice.onSpeechEnd = () => {
-    isListening = false;
-  };
+export function configureSTT(url: string, token: string) {
+  apiUrl = url.replace(/\/+$/, '');
+  authToken = token;
 }
 
 /**
- * Start listening for speech
+ * Transcribe an audio file via the OpenClaw gateway
+ * Sends the audio as multipart form data to the transcribe endpoint
  */
-export async function startListening(): Promise<void> {
+export async function transcribeAudio(audioUri: string): Promise<string> {
   try {
-    finalResult = '';
-    isListening = true;
-    await Voice.start('en-US');
+    const formData = new FormData();
+    formData.append('audio', {
+      uri: audioUri,
+      type: 'audio/m4a',
+      name: 'recording.m4a',
+    } as any);
+
+    const response = await axios.post<{ text: string; confidence?: number }>(
+      `${apiUrl}/api/transcribe`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        timeout: 15000,
+      }
+    );
+
+    return response.data.text || '';
   } catch (error) {
-    console.error('Failed to start voice recognition:', error);
-    isListening = false;
-    throw new Error('Voice recognition unavailable');
-  }
-}
-
-/**
- * Stop listening and return the final transcript
- */
-export async function stopListening(): Promise<string> {
-  try {
-    await Voice.stop();
-    isListening = false;
-    return finalResult;
-  } catch (error) {
-    console.error('Failed to stop voice recognition:', error);
-    isListening = false;
-    return finalResult;
-  }
-}
-
-/**
- * Check if currently listening
- */
-export function getIsListening(): boolean {
-  return isListening;
-}
-
-/**
- * Clean up voice recognition resources
- */
-export async function destroyVoice(): Promise<void> {
-  try {
-    await Voice.destroy();
-    onTranscript = null;
-    isListening = false;
-  } catch {
-    // Ignore cleanup errors
-  }
-}
-
-/**
- * Check if on-device speech recognition is available
- */
-export async function isVoiceAvailable(): Promise<boolean> {
-  try {
-    const services = await Voice.getSpeechRecognitionServices();
-    return (services?.length ?? 0) > 0;
-  } catch {
-    return false;
+    console.warn('Server transcription failed, audio recorded for manual review');
+    throw new Error('Voice transcription unavailable — try typing instead');
   }
 }
