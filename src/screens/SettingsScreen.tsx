@@ -82,6 +82,8 @@ function PrivateSettingsView() {
     updateSettings({ gatewayUrl: config.gatewayTailscaleUrl, networkMode: 'tailscale' });
   };
 
+  const [picoKey, setPicoKey] = useState(ps.picovoiceAccessKey || '');
+
   return (
     <>
       <Text style={styles.sectionTitle}>Gateway Connection</Text>
@@ -150,6 +152,47 @@ function PrivateSettingsView() {
             {isConnected ? `Connected ${networkStatus}` : 'Not connected'}
           </Text>
         </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>Wake Word — "Hey Chuck"</Text>
+      <View style={styles.card}>
+        <View style={styles.switchRow}>
+          <View>
+            <Text style={styles.switchLabel}>Wake Word Detection</Text>
+            <Text style={styles.switchDesc}>Say "Hey Chuck" to activate</Text>
+          </View>
+          <Switch
+            value={ps.wakeWordEnabled}
+            onValueChange={(v) => updateSettings({ wakeWordEnabled: v })}
+            trackColor={{ false: colors.surfaceLight, true: colors.primary + '60' }}
+            thumbColor={ps.wakeWordEnabled ? colors.primary : colors.textMuted}
+          />
+        </View>
+
+        <Text style={[styles.label, { marginTop: spacing.md }]}>Picovoice Access Key</Text>
+        <TextInput
+          style={styles.input}
+          value={picoKey}
+          onChangeText={setPicoKey}
+          placeholder="Get free key at console.picovoice.ai"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.testBtn} onPress={() => Linking.openURL('https://console.picovoice.ai')}>
+            <Text style={styles.testBtnText}>Get Free Key →</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.saveBtn} onPress={() => {
+            updateSettings({ picovoiceAccessKey: picoKey.trim() });
+            Alert.alert('Saved', 'Restart the app to activate wake word.');
+          }}>
+            <Text style={styles.saveBtnText}>Save Key</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={[styles.autoNote, { marginTop: spacing.sm }]}>
+          Wake word runs entirely on-device. No audio is sent to the cloud for detection.
+        </Text>
       </View>
     </>
   );
@@ -314,4 +357,5 @@ const styles = StyleSheet.create({
   radioText: { fontSize: 16, color: colors.text },
   aboutText: { fontSize: 16, color: colors.text, fontWeight: '600' },
   aboutSub: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  autoNote: { fontSize: 12, color: colors.textMuted, lineHeight: 16 },
 });

@@ -38,6 +38,8 @@ function getDefaultSettings(): AppSettings {
       networkMode: 'auto',
       ttsEnabled: true,
       hapticEnabled: true,
+      wakeWordEnabled: true,
+      picovoiceAccessKey: '',
     };
   }
   return {

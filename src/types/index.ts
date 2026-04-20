@@ -24,6 +24,8 @@ export interface PrivateSettings {
   networkMode: 'auto' | 'local' | 'tailscale';
   ttsEnabled: boolean;
   hapticEnabled: boolean;
+  wakeWordEnabled: boolean;
+  picovoiceAccessKey: string;
 }
 
 // Public build settings (OpenAI direct)
