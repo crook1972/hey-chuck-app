@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeScreen } from '../screens/HomeScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -51,6 +52,8 @@ export function AppNavigation() {
     ? !isConnected  // Private: badge when not connected
     : settings.mode === 'public' && !(settings as any).apiKey;  // Public: badge when no key
 
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 0);
   return (
     <NavigationContainer theme={darkTheme}>
       <Tab.Navigator
@@ -61,8 +64,9 @@ export function AppNavigation() {
           tabBarStyle: {
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            paddingBottom: 4,
-            height: 56,
+            paddingBottom: bottomInset + 8,
+            paddingTop: 6,
+            height: 56 + bottomInset,
           },
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,

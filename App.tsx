@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppNavigation } from './src/navigation';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { useStore } from './src/store/useStore';
@@ -31,13 +32,13 @@ export default function App() {
   if (loading) return null;
 
   return (
-    <>
+    <SafeAreaProvider>
       <StatusBar style="light" />
       {showOnboarding ? (
         <OnboardingScreen onComplete={handleOnboardingComplete} />
       ) : (
         <AppNavigation />
       )}
-    </>
+    </SafeAreaProvider>
   );
 }
