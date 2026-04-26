@@ -22,8 +22,8 @@ const PRIVATE_CONFIG = {
   gatewayLocalUrl: 'http://192.168.4.245:18789',
   // Tailscale (works from anywhere — primary default)
   gatewayTailscaleUrl: 'https://chucks-server.tailb484c2.ts.net:18789',
-  // Pre-filled auth token
-  gatewayToken: '24f4a709604098d908618aa1c8877baadc2b9a79a0d5787d',
+  // Auth token intentionally not committed; enter it in Settings
+  gatewayToken: '',
   // Default gateway URL — Tailscale hostname so it works everywhere out of the box
   defaultGatewayUrl: 'https://chucks-server.tailb484c2.ts.net:18789',
 };

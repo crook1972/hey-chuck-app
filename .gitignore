@@ -42,3 +42,10 @@ yarn-error.*
 /android
 android/
 android/
+
+# Generated local build/cache artifacts
+.tmp/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
